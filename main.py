@@ -1,4 +1,5 @@
 import os
+import sys
 import pandas as pd
 import numpy as np
 import graphviz
@@ -19,6 +20,10 @@ def initCSV(csvfile):
     np.set_printoptions(linewidth=desired_width)
     pd.set_option('display.max_columns', 15)
 
+    # backup read in dataframe
+    global backupdf
+    backupdf = df
+
     return df
 
 
@@ -27,18 +32,19 @@ def targetCol(df):
     print("Choose target attribute from available columns below: ")
     # display columns
     for i in range(len(df.columns)):
-        print(str(i+1) + ". " + df.columns[i])
+        print(str(i + 1) + ". " + df.columns[i])
     # select target column
     while True:
         try:
             ans = int(input("Enter the number of the target column above: "))
-            if ans not in range(1, len(df.columns)+1):
+            if ans not in range(1, len(df.columns) + 1):
                 raise ValueError
         except ValueError:
             print("Error: please enter a number between 1 and " + str(len(df.columns)) + ".\n")
         else:
             break
-    return df.columns[ans]
+    return df.columns[ans - 1]
+
 
 # method to select file from those already in the directory
 def existingFile():
@@ -48,25 +54,25 @@ def existingFile():
     listing = []
     for file in os.listdir(path_to_watch):
         try:
-            pd.read_csv(file)
+            pd.read_csv(file)           # for some reason this doesn't skip over some non .csv files like it should
             listing.append(file)
         except (ValueError, PermissionError):
             pass
 
     for i in range(len(listing)):
-        print(str(i+1) + ". " + listing[i])
+        print(str(i + 1) + ". " + listing[i])
 
     while True:
         try:
             ans = int(input("Enter the number of the file above that you'd like to use: "))
-            if ans not in range(1, len(listing)+1):
+            if ans not in range(1, len(listing) + 1):
                 raise ValueError
         except ValueError:
             print("Error: please enter a number between 1 and " + str(len(listing)) + ".\n")
         else:
             break
 
-    return listing[ans-1]
+    return listing[ans - 1]
 
 
 # method to monitor the current directory for added/removed files so that the user can add their own dataset
@@ -115,9 +121,8 @@ def uploadFile():
 
 # method to confirm file choice and validity
 def confirm(f):
-
     try:
-       pd.read_csv(f)
+        pd.read_csv(f)
     except (ValueError, PermissionError):
         print("Error: chosen file is not a readable .csv. Please upload a different file.")
         return False
@@ -140,49 +145,30 @@ def confirm(f):
 
 
 # function to drop a column in the list cols
-def drop(df, cols):
-
+def dropCol(df, cols):
     print("\nDroppable Columns:")
     for i in range(len(cols)):
-        print(str(i+1) + ". " + str(cols[i]))
+        print(str(i + 1) + ". " + str(cols[i]))
 
     while True:
         try:
             ans = int(input("Choose a column to drop by entering the corresponding number (or 0 to cancel): "))
-            if ans not in range(0, len(cols)+1):
+            if ans not in range(0, len(cols) + 1):
                 raise ValueError
         except ValueError:
             print("Error: please enter the number of an option above.\n")
         else:
             break
 
-    if ans == 1:
-        newdf = df.drop(cols[0], axis=1)
-        print("\nDropped column: " + cols[0])
-        del(cols[0])
-
-    elif ans == 2:
-        newdf = df.drop(cols[1], axis=1)
-        print("\nDropped column: " + cols[1])
-        del (cols[1])
-
-    elif ans == 3:
-        newdf = df.drop(cols[2], axis=1)
-        print("\nDropped column: " + cols[2])
-        del (cols[2])
-
-    elif ans == 4:
-        newdf = df.drop(cols[3], axis=1)
-        print("\nDropped column: " + cols[3])
-        del (cols[3])
-
-    elif ans == 5:
-        newdf = df.drop(cols[4], axis=1)
-        print("\nDropped column: " + cols[4])
-        del (cols[4])
+    if ans == 0:
+        global backupdf
+        print("Colummn drop cancelled. Original data restored.")
+        print(backupdf)
+        return backupdf
     else:
-        print("Colummn drop cancelled.")
-        return df
+        newdf = df.drop(cols[ans - 1], axis=1)
+        print("\nDropped column: " + cols[ans-1])
+        cols.pop(ans-1)
 
     print("New Dataset: ")
     print(newdf)
@@ -198,10 +184,42 @@ def drop(df, cols):
             break
 
     if ans in ('y', 'Y'):
-        drop(newdf, cols)
+        return dropCol(newdf, cols)
     elif ans in ('n', 'N'):
-        pass
-    return newdf
+        return newdf
+
+
+# method for calculating and displaying percent of missing data for each column of a dataframe (df)
+def missing(df):
+    flagged = []
+
+    # checking the percentage of missing values in each variable
+    print("\nPercent of missing values in each column:")
+    print(df.isnull().sum() / len(df) * 100)
+    temp = df.isnull().sum() / len(df) * 100
+
+    # set tolerance for percent of missing data
+    while True:
+        try:
+            thresh = float(
+                input("\nEnter the maximum missing value tolerated as a decimal percentage between 0 and 1: "))
+            if thresh < 0 or thresh >= 1:
+                raise ValueError
+        except ValueError:
+            print("Error: please enter a decimal percentage between 0 and 1.")
+        else:
+            break
+
+    # flag columns that are missing more than the tolerated percentage
+    for i in range(len(df.columns)):
+        if temp[i] > thresh:
+            flagged.append(df.columns[i])
+    # drop flagged columns, if applicable. Then return new dataframe
+    if flagged:
+        return dropCol(df, flagged)
+    else:
+        print("No columns droppable with given conditions.")
+        return df
 
 
 # function for determining the correlation percentages between the various columns of a dataframe (df)
@@ -257,7 +275,9 @@ def correlation(df):
             uniqueFlagged.append(flaggedArr[i, 1])
 
     print("Flagged columns with a correlation greater than " + str(low) + ":")
-    return drop(df, uniqueFlagged)
+
+
+    return dropCol(df, uniqueFlagged)
 
 
 # function to split data into training and testing for tree. test size is 1/5 of the data
@@ -273,6 +293,17 @@ def split(df, col):
 
 # function to make a classifier decision tree from data
 def treeClassify(x, y, file, plot):
+    # convert target label into integers for evaluation
+    # ['allow' 'deny' 'drop' 'reset-both'] mapped to [0, 1, 2, 3]
+    le = preprocessing.LabelEncoder()
+    le.fit(y)
+
+    try:
+        # string representation of labels
+        float(y[0])
+    except ValueError:
+        # integer representation of labels
+        y = le.transform(y)
 
     # split x and y into train and test groups
     xtrain, xtest, ytrain, ytest = train_test_split(x, y, test_size=0.20)
@@ -286,12 +317,12 @@ def treeClassify(x, y, file, plot):
 
     # if plot is true, export as visualized tree
     if plot:
-        dot_data = tree.export_graphviz(clf, out_file=None, feature_names=x.columns, class_names=y, filled=True)
+        dot_data = tree.export_graphviz(clf, out_file=None, feature_names=x.columns, class_names=le.inverse_transform(y), filled=True)
         graph = graphviz.Source(dot_data)
         graph.render(file.replace('.csv', '') + "_Classifier")
-        print("Exported classifier tree to pdf")
+        print("Exported classifier tree to pdf as '" + file.replace('.csv', '') + "_Classifier'")
     # return prediction accuracy of algorithm (inverse transformed back to string target values) and percent accuracy
-    return pd.DataFrame({'Actual': (ytest), 'Predicted': (ypred)}), accuracy_score(ytest, ypred)*100
+    return pd.DataFrame({'Actual': le.inverse_transform(ytest), 'Predicted': (le.inverse_transform(ypred))}), accuracy_score(ytest, ypred) * 100
 
 
 # function to make a regression decision tree from data
@@ -299,7 +330,6 @@ def treeRegression(x, y, file, plot):
     # convert target label into integers for evaluation
     # ['allow' 'deny' 'drop' 'reset-both'] mapped to [0, 1, 2, 3]
     le = preprocessing.LabelEncoder()
-
     le.fit(y)
 
     try:
@@ -312,8 +342,8 @@ def treeRegression(x, y, file, plot):
     # split x and y into train and test groups
     xtrain, xtest, ytrain, ytest = train_test_split(x, y, test_size=0.20)
 
-    reg = tree.DecisionTreeRegressor()      # initialize regression tree
-    reg = reg.fit(xtrain, ytrain)                 # fit
+    reg = tree.DecisionTreeRegressor()  # initialize regression tree
+    reg = reg.fit(xtrain, ytrain)  # fit
     ypred = reg.predict(xtest)
 
     # if plot is true, export as visualized tree
@@ -321,24 +351,39 @@ def treeRegression(x, y, file, plot):
         dot_data = tree.export_graphviz(reg, out_file=None, feature_names=x.columns, class_names=y, filled=True)
         graph = graphviz.Source(dot_data)
         graph.render(file.replace('.csv', '') + "_Regression")
-        print("Exported regression tree to pdf")
+        print("Exported regression tree to pdf as '" + file.replace('.csv', '') + "_Regression")
     # return prediction accuracy of algorithm and percent accuracy
     return pd.DataFrame({'Actual': ytest, 'Predicted': ypred}), mean_squared_error(ytest, ypred)
 
 
+# method to save output dataframe as new .csv
+def save(df):
+
+    name = input("Enter a name for your newly saved file: ")
+
+    # add .csv extension if user does not
+    if not name.endswith(".csv"):
+        name = name + ".csv"
+
+    df.to_csv(name, index=False)
+    print("New data saved to '" + name + "'")
+
+
+# ----------------START----------------------------------------------------
 # starting function to drive other methods based on user choices
 def start():
     # intro message
     print("This program performs supervised machine learning predictive analysis on a chosen dataset.\n")
 
+    # ---------------CHOOSING FILE TO WORK WITH------------------------------
     print("What dataset would you like to use?\n"
           "1. Select an existing dataset in the directory\n"
           "2. Upload a new dataset\n")
 
     while True:
         try:
-            ans = int(input("Choose an option above by entering its corresponding number: "))
-            if ans not in (1, 2):
+            ans1 = int(input("Choose an option above by entering its corresponding number: "))
+            if ans1 not in (1, 2):
                 raise ValueError
         except ValueError:
             print("Error: please enter the number 1 or 2.\n")
@@ -346,9 +391,9 @@ def start():
             break
 
     # choose file to use
-    if ans == 1:
+    if ans1 == 1:
         chosenFile = existingFile()
-    elif ans == 2:
+    elif ans1 == 2:
         chosenFile = uploadFile()
 
     # turn chosen .csv file into panda dataframe
@@ -357,95 +402,107 @@ def start():
     print("Original Dataset:")
     print(data)
 
+    # --------------DIMENSIONALITY REDUCTION------------------------------------------------------
+    while True:
+        # choose operation
+        print("Would you like to perform one of the following dimensionality reduction techniques on the dataset?\n"
+              "1. Missing Value Ratio\n"
+              "2. High Correlation Filter\n"
+              "3. No, continue with the current data\n")
+        try:
+            ans2 = int(input("Choose an option above by entering its corresponding number: "))
+            if ans2 not in (1, 2, 3):
+                raise ValueError
+        except ValueError:
+            print("Error: please enter the number 1, 2, or 3.\n")
+        else:
+            # missing value
+            if ans2 == 1:
+                data = missing(data)
+            elif ans2 == 2:
+                # remove high correlation and set as new dataframe
+                data = correlation(data)
+            elif ans2 == 3:
+                break
+
+    print("Data after Dimensionality Reduction:")
+    print(data)
+
+    # --------------SPLITTING AND TRAINING ML TREE------------------------------------------------------
     # choose target attribute from dataset
     target = targetCol(data)
 
-    # print(data.describe())
+    print("Target attribute: " + target)
 
+    # split features into data and target attribute
     xysplit = split(data, target)
 
-    # choose operation
+    # choose analysis type
     print("Would you like to perform tree classification or regression analysis on the dataset?\n"
           "1. Classification\n"
           "2. Regression\n")
 
     while True:
         try:
-            ans = int(input("Choose an option above by entering its corresponding number: "))
-            if ans not in (1, 2):
+            ans3 = int(input("Choose an option above by entering its corresponding number: "))
+            if ans3 not in (1, 2):
                 raise ValueError
         except ValueError:
             print("Error: please enter the number 1, 2, or 3.\n")
         else:
             break
 
-    if ans == 1:
+    # classification
+    if ans3 == 1:
         classifydf = treeClassify(xysplit[0], xysplit[1], chosenFile, plot=True)
         # print out accuracy of predictions, round percent accuracy to 2 decimals
-        print("\nAccuracy of Predictions for Classifier Tree: " + str(round(classifydf[1], 2)) + "%")
+        print("\nAccuracy of Predictions for Classifier Tree: " + str(round(classifydf[1], 2)) + "%\n")
         print(classifydf[0])
-    elif ans == 2:
+    # regression
+    elif ans3 == 2:
         regressiondf = treeRegression(xysplit[0], xysplit[1], chosenFile, plot=True)
         print("\nRoot Mean Square Error for Regression Tree: " + str(round(regressiondf[1], 5)))
         print(regressiondf[0])
 
-    # choose operation
-    print("What dimensionality reduction technique do you want to perform?\n"
-          "1. Missing Value Ratio\n"
-          "2. High Correlation Filter\n")
-
-    while True:
-        try:
-            ans = int(input("Choose an option above by entering its corresponding number: "))
-            if ans not in (1, 2):
-                raise ValueError
-        except ValueError:
-            print("Error: please enter the number 1, 2, or 3.\n")
-        else:
-            break
-
-    if ans == 1:
-        newData = missing(data)
-    elif ans == 2:
-        # remove high correlation and set as new dataframe
-        newData = correlation(data)
-
+    # --------------SAVING CURRENT DATA------------------------------------------------------
     # check if changes were made
-    if newData.equals(data):
-        print("Data remains unchanged.")
+    global backupdf
+    if data.equals(backupdf):
+        pass
     else:
         # option to save new data
         while True:
             try:
-                ans = input("Would you like to save your new dataset as a new .csv file?\nEnter 'y' or 'n': ")
-                if ans not in ('y', 'Y', 'n', 'N'):
+                ans4 = input("Would you like to save your current dataset as a new .csv file?\nEnter 'y' or 'n': ")
+                if ans4 not in ('y', 'Y', 'n', 'N'):
                     raise ValueError
             except ValueError:
                 print("Error: please enter 'y' for yes or 'n' for no.\n")
             else:
                 break
-
-        if ans in ('y', 'Y'):
+        if ans4 in ('y', 'Y'):
             # save to new .csv
-            save(newData)
+            save(data)
 
+    # --------------OPTION TO RESTART------------------------------------------------------
     while True:
         try:
-            ans = input("Would you like to operate on another .csv file?\nEnter 'y' or 'n': ")
-            if ans not in ('y', 'Y', 'n', 'N'):
+            ans5 = input("Would you like to operate on another .csv file?\nEnter 'y' or 'n': ")
+            if ans5 not in ('y', 'Y', 'n', 'N'):
                 raise ValueError
         except ValueError:
             print("Error: please enter 'y' for yes or 'n' for no.\n")
         else:
             break
 
-    if ans in ('y', 'Y'):
+    if ans5 in ('y', 'Y'):
         # restart program
         start()
-    elif ans in ('n', 'N'):
+    elif ans5 in ('n', 'N'):
         # end program
         print("Bye!")
         sys.exit()
 
 
+# call to driving function
 start()
